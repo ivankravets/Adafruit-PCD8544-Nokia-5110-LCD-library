@@ -114,12 +114,14 @@ uint8_t * Adafruit_PCD8544::getPixelBuffer(){
 }
 
 void Adafruit_PCD8544::powerSaving(boolean i) {
+  if (isHardwareSPI()) spi_begin();
   if(!i) command(PCD8544_FUNCTIONSET);
   else {
 	clearDisplay();
 	display();
 	command(PCD8544_FUNCTIONSET | PCD8544_POWERDOWN);
 	}
+  if (isHardwareSPI()) spi_end();
 }
 
 static void updateBoundingBox(uint8_t xmin, uint8_t ymin, uint8_t xmax, uint8_t ymax) {
