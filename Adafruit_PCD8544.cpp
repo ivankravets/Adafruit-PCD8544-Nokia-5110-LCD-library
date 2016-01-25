@@ -109,9 +109,10 @@ uint8_t pcd8544_buffer[LCDWIDTH * LCDHEIGHT / 8] = {
 static uint8_t xUpdateMin, xUpdateMax, yUpdateMin, yUpdateMax;
 #endif
 
-void Adafruit_PCD8544::scroll(uint8_t direction, uint8_t pixels){
+void Adafruit_PCD8544::scroll(uint8_t direction, uint8_t pixels, uint8_t fillColor){
   uint8_t oldpixels;
   uint8_t newpixels;
+  uint8_t _fillColor = (fillColor & 1) * 255;
   int i, j;
   if (pixels==0) {
     return;
@@ -120,11 +121,11 @@ void Adafruit_PCD8544::scroll(uint8_t direction, uint8_t pixels){
     case SCROLL_DOWN:
       if (pixels>7) {
           if (pixels>=LCDHEIGHT) {
-            memset(pcd8544_buffer, 0, LCDWIDTH*LCDHEIGHT/8);
+            memset(pcd8544_buffer, _fillColor, LCDWIDTH*LCDHEIGHT/8);
             return;
           }
         memmove(&pcd8544_buffer[LCDWIDTH*((pixels)>>3)],&pcd8544_buffer[0],LCDWIDTH*((LCDHEIGHT-pixels)>>3));
-        memset(pcd8544_buffer, 0, LCDWIDTH*((pixels)>>3));
+        memset(pcd8544_buffer, _fillColor, LCDWIDTH*((pixels)>>3));
       }
       if (pixels % 8 != 0) {
         for (i=0;i<LCDWIDTH;i++) {
@@ -136,15 +137,16 @@ void Adafruit_PCD8544::scroll(uint8_t direction, uint8_t pixels){
           }
         }
       }
+      if(fillColor) for(i=0; i<pixels; i++) Adafruit_GFX::drawFastHLine(0, i, LCDWIDTH - 1, fillColor);
       break;
     case SCROLL_UP:
       if (pixels>7) {
           if (pixels>=LCDHEIGHT) {
-            memset(pcd8544_buffer, 0, LCDWIDTH*LCDHEIGHT/8);
+            memset(pcd8544_buffer, _fillColor, LCDWIDTH*LCDHEIGHT/8);
             return;
           }
         memmove(&pcd8544_buffer[LCDWIDTH*((pixels)>>3)],&pcd8544_buffer[0],LCDWIDTH*((LCDHEIGHT-pixels)>>3));
-        memset(pcd8544_buffer, 0, LCDWIDTH*((pixels)>>3));
+        memset(pcd8544_buffer, _fillColor, LCDWIDTH*((pixels)>>3));
       }
       if (pixels % 8 != 0) {
         for (i=0;i<LCDWIDTH;i++) {
@@ -156,28 +158,28 @@ void Adafruit_PCD8544::scroll(uint8_t direction, uint8_t pixels){
           }
         }
       }
+      if(fillColor) for(i=0; i<pixels; i++) Adafruit_GFX::drawFastHLine(0, LCDHEIGHT - i - 1, LCDWIDTH - 1, fillColor);
       break;
     case SCROLL_LEFT:
       if (pixels>=LCDWIDTH) {
-      memset(pcd8544_buffer, 0, LCDWIDTH*LCDHEIGHT/8);
+      memset(pcd8544_buffer, _fillColor, LCDWIDTH*LCDHEIGHT/8);
       return;
       }
       for (i=0;i<LCDHEIGHT/8;i++) {
         memmove(&pcd8544_buffer[i*LCDWIDTH],&pcd8544_buffer[i*LCDWIDTH+pixels],LCDWIDTH-pixels);
-        memset(&pcd8544_buffer[i*LCDWIDTH-pixels], 0, pixels);
+        memset(&pcd8544_buffer[i*LCDWIDTH-pixels], _fillColor, pixels);
       }
-      for(i=0; i<pixels; i++) Adafruit_GFX::drawFastVLine(LCDWIDTH - i - 1, 0, LCDHEIGHT, 0);
+      for(i=0; i<pixels; i++) Adafruit_GFX::drawFastVLine(LCDWIDTH - i - 1, 0, LCDHEIGHT, fillColor);
       break;
     case SCROLL_RIGHT:
       if (pixels>=LCDWIDTH) {
-        memset(pcd8544_buffer, 0, LCDWIDTH*LCDHEIGHT/8);
+        memset(pcd8544_buffer, _fillColor, LCDWIDTH*LCDHEIGHT/8);
         return;
         }
       for (i=0;i<LCDHEIGHT/8;i++) {
         memmove(&pcd8544_buffer[i*LCDWIDTH+pixels],&pcd8544_buffer[i*LCDWIDTH],LCDWIDTH-pixels);
-        memset(&pcd8544_buffer[(i+1)*LCDWIDTH-pixels], 0, pixels);
       }
-      for(i=0; i<pixels; i++) Adafruit_GFX::drawFastVLine(i, 0, LCDHEIGHT, 0);
+      for(i=0; i<pixels; i++) Adafruit_GFX::drawFastVLine(i, 0, LCDHEIGHT, fillColor);
       break;
     default:
       break;
@@ -195,8 +197,7 @@ void Adafruit_PCD8544::powerSaving(boolean i) {
 	if (isHardwareSPI()) spi_end();
 	}
   else {
-	clearDisplay();
-	display();
+	clearDisplayRAM();
 	if (isHardwareSPI()) spi_begin();
 	command(PCD8544_FUNCTIONSET | PCD8544_POWERDOWN);
 	if (isHardwareSPI()) spi_end();
@@ -492,24 +493,25 @@ void Adafruit_PCD8544::invertDisplay(boolean i) {
   if (isHardwareSPI()) spi_end();
 }
 
-/*
-// this doesnt touch the buffer, just clears the display RAM - might be handy
-void Adafruit_PCD8544::clearDisplay(void) {
+void Adafruit_PCD8544::clearDisplayRAM(void) {
+  uint8_t col, maxcol, p;
 
-  uint8_t p, c;
+  if (isHardwareSPI()) spi_begin();
+  for(p = 0; p < 6; p++) {
+    command(PCD8544_SETYADDR | p);
+    col = 0;
+    maxcol = LCDWIDTH-1;
+    command(PCD8544_SETXADDR | col);
 
-  for(p = 0; p < 8; p++) {
-
-    st7565_command(CMD_SET_PAGE | p);
-    for(c = 0; c < 129; c++) {
-      //uart_putw_dec(c);
-      //uart_putchar(' ');
-      st7565_command(CMD_SET_COLUMN_LOWER | (c & 0xf));
-      st7565_command(CMD_SET_COLUMN_UPPER | ((c >> 4) & 0xf));
-      st7565_data(0x0);
+    digitalWrite(_dc, HIGH);
+    if (_cs > 0)
+      digitalWrite(_cs, LOW);
+    for(; col <= maxcol; col++) {
+      spiWrite(0);
     }
-    }
-
+    if (_cs > 0)
+      digitalWrite(_cs, HIGH);
+  }
+  command(PCD8544_SETYADDR );  // no idea why this is necessary but it is to finish the last byte?
+  if (isHardwareSPI()) spi_end();
 }
-
-*/

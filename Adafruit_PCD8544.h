@@ -94,12 +94,13 @@ class Adafruit_PCD8544 : public Adafruit_GFX {
   uint8_t * getPixelBuffer();
   // Enable/disable power-saving mode, ie. turn the display off/on
   void powerSaving(boolean i);
-  void scroll(uint8_t direction = SCROLL_UP, uint8_t pixels = 1);
+  void scroll(uint8_t direction = SCROLL_UP, uint8_t pixels = 1, uint8_t fillColor = WHITE);
 
   void drawPixel(int16_t x, int16_t y, uint16_t color);
   uint8_t getPixel(int8_t x, int8_t y);
 
  private:
+  void clearDisplayRAM(void);
   int8_t _din, _sclk, _dc, _rst, _cs;
   volatile PortReg  *mosiport, *clkport;
   PortMask mosipinmask, clkpinmask;
