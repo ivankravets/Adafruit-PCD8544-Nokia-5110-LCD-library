@@ -294,6 +294,8 @@ void Adafruit_PCD8544::begin(uint8_t contrast, uint8_t bias) {
 #ifdef ESP8266
     // Datasheet says 4 MHz is max SPI clock speed
     SPI.setFrequency(4000000);
+#elif defined (__STM32F1__)
+    SPI.setClockDivider(SPI_CLOCK_DIV16);
 #else
     SPI.setClockDivider(PCD8544_SPI_CLOCK_DIV);
 #endif
@@ -472,7 +474,10 @@ void Adafruit_PCD8544::display(void) {
     SPI.writeBytes(pcd8544_buffer, 504);
 //Resort to the default if no optimized method available
 #elif defined (__STM32F1__)
-    SPI.write(pcd8544_buffer, 504);
+    {
+      SPI.setDataSize (0);
+      SPI.dmaSend(pcd8544_buffer, 504);
+    }
 #else
     for(int i=0; i<504; i++) spiWrite(pcd8544_buffer[i]);
 #endif
@@ -521,6 +526,11 @@ void Adafruit_PCD8544::display(void) {
         col++;
       }
       SPI.writeBytes(&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
+    } else
+    #elif defined(__STM32F1__)
+    if(isHardwareSPI()){
+      SPI.setDataSize (0);
+      SPI.dmaSend((uint8_t *)&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
     } else
     #endif
     for(; col <= maxcol; col++) {
