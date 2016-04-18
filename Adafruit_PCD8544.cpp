@@ -45,7 +45,7 @@ All text above, and the splash screen below must be included in any redistributi
 // establish settings and protect from interference from other
 // libraries.  Otherwise, they simply do nothing.
 #ifdef SPI_HAS_TRANSACTION
-#ifdef ESP8266
+#if defined (ESP8266) || defined (__STM32F1__)
 SPISettings spiSettings = SPISettings(4000000, MSBFIRST, SPI_MODE0);
 #else
 SPISettings spiSettings = SPISettings(PCD8544_SPI_CLOCK_DIV, MSBFIRST, SPI_MODE0);
@@ -455,33 +455,39 @@ void Adafruit_PCD8544::display(void) {
 
   if (isHardwareSPI()) spi_begin();
 #ifndef enablePartialUpdate
+  command(PCD8544_SETYADDR);
+  command(PCD8544_SETXADDR);
+#ifdef USE_FAST_PINIO
+  *dcport |= dcpinmask;
+  if(_cs) *csport &= ~cspinmask;
+#else
+  digitalWrite(_dc, HIGH);
+  if (_cs > 0)
+    digitalWrite(_cs, LOW);
+#endif
+  if(isHardwareSPI())
+//Add hardware-specific optimized methods for pushing those 504 bytes over SPI as needed
+//This one's for ESP8266
 #if defined(ESP8266)
-  if(isHardwareSPI()){
-    command(PCD8544_SETYADDR);
-    command(PCD8544_SETXADDR);
-    #ifdef USE_FAST_PINIO
-    *dcport |= dcpinmask;
-    if(_cs) *csport &= ~cspinmask;
-    #else
-    digitalWrite(_dc, HIGH);
-    if (_cs > 0)
-      digitalWrite(_cs, LOW);
-    #endif
     SPI.writeBytes(pcd8544_buffer, 504);
-    #ifdef USE_FAST_PINIO
-    if(_cs) *csport |= cspinmask;
-    #else
-    if (_cs > 0)
-      digitalWrite(_cs, HIGH);
-    #endif
-    command(PCD8544_SETYADDR );  // no idea why this is necessary but it is to finish the last byte?
-    spi_end();
-    return;
-  }
+//Resort to the default if no optimized method available
+#elif defined (__STM32F1__)
+    SPI.write(pcd8544_buffer, 504);
+#else
+    for(int i=0; i<504; i++) spiWrite(pcd8544_buffer[i]);
 #endif
+//Also just resort to the default if no H/W SPI
+  else for(int i=0; i<504; i++) spiWrite(pcd8544_buffer[i]);
+#ifdef USE_FAST_PINIO
+  if(_cs) *csport |= cspinmask;
+#else
+  if (_cs > 0)
+    digitalWrite(_cs, HIGH);
 #endif
+  command(PCD8544_SETYADDR );  // no idea why this is necessary but it is to finish the last byte?
+  spi_end();
+#else
   for(p = 0; p < 6; p++) {
-#ifdef enablePartialUpdate
     // check if this page is part of update
     if ( yUpdateMin >= ((p+1)*8) ) {
       continue;   // nope, skip it!
@@ -489,19 +495,13 @@ void Adafruit_PCD8544::display(void) {
     if (yUpdateMax < p*8) {
       break;
     }
-#endif
-
     command(PCD8544_SETYADDR | p);
 
-
-#ifdef enablePartialUpdate
     col = xUpdateMin;
     maxcol = xUpdateMax;
-#else
     // start at the beginning of the row
     col = 0;
     maxcol = LCDWIDTH-1;
-#endif
 
     command(PCD8544_SETXADDR | col);
 
@@ -537,13 +537,11 @@ void Adafruit_PCD8544::display(void) {
 
   command(PCD8544_SETYADDR );  // no idea why this is necessary but it is to finish the last byte?
   if (isHardwareSPI()) spi_end();
-#ifdef enablePartialUpdate
   xUpdateMin = LCDWIDTH - 1;
   xUpdateMax = 0;
   yUpdateMin = LCDHEIGHT-1;
   yUpdateMax = 0;
 #endif
-
 }
 
 // clear everything
@@ -576,6 +574,12 @@ void Adafruit_PCD8544::clearDisplayRAM(uint8_t color) {
   #endif
   #ifdef ESP8266
   if(isHardwareSPI()) SPI.writePattern(&color, 1, counter);
+  else
+  #elif defined (__STM32F1__)
+  if(isHardwareSPI()){
+  SPI.setDataSize (0);
+  SPI.dmaSend(&color, 504, 0);
+  }
   else
   #endif
   while(counter--) spiWrite(color);
