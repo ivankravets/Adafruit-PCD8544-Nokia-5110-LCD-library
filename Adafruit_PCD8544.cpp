@@ -454,7 +454,8 @@ void Adafruit_PCD8544::display(void) {
   uint8_t col, maxcol, p;
 
   if (isHardwareSPI()) spi_begin();
-#ifndef enablePartialUpdate && defined(ESP8266)
+#ifndef enablePartialUpdate
+#if defined(ESP8266)
   if(isHardwareSPI()){
     command(PCD8544_SETYADDR);
     command(PCD8544_SETXADDR);
@@ -477,6 +478,7 @@ void Adafruit_PCD8544::display(void) {
     spi_end();
     return;
   }
+#endif
 #endif
   for(p = 0; p < 6; p++) {
 #ifdef enablePartialUpdate
