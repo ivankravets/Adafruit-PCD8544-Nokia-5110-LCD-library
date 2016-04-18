@@ -103,7 +103,7 @@ uint8_t pcd8544_buffer[LCDWIDTH * LCDHEIGHT / 8] = {
 // reduces how much is refreshed, which speeds it up!
 // originally derived from Steve Evans/JCW's mod but cleaned up and
 // optimized
-//#define enablePartialUpdate
+#define enablePartialUpdate
 
 #ifdef enablePartialUpdate
 static uint8_t xUpdateMin, xUpdateMax, yUpdateMin, yUpdateMax;
@@ -299,6 +299,13 @@ void Adafruit_PCD8544::begin(uint8_t contrast, uint8_t bias) {
 #endif
     SPI.setDataMode(SPI_MODE0);
     SPI.setBitOrder(MSBFIRST);
+
+#ifdef USE_FAST_PINIO
+    csport    = portOutputRegister(digitalPinToPort(_cs));
+    cspinmask = digitalPinToBitMask(_cs);
+    dcport    = portOutputRegister(digitalPinToPort(_dc));
+    dcpinmask = digitalPinToBitMask(_dc);
+#endif
   }
   else {
     // Setup software SPI.
@@ -307,12 +314,16 @@ void Adafruit_PCD8544::begin(uint8_t contrast, uint8_t bias) {
     pinMode(_din, OUTPUT);
     pinMode(_sclk, OUTPUT);
 
-#ifndef ESP8266
+#ifdef USE_FAST_PINIO
     // Set software SPI ports and masks.
     clkport     = portOutputRegister(digitalPinToPort(_sclk));
     clkpinmask  = digitalPinToBitMask(_sclk);
     mosiport    = portOutputRegister(digitalPinToPort(_din));
     mosipinmask = digitalPinToBitMask(_din);
+    csport    = portOutputRegister(digitalPinToPort(_cs));
+    cspinmask = digitalPinToBitMask(_cs);
+    dcport    = portOutputRegister(digitalPinToPort(_dc));
+    dcpinmask = digitalPinToBitMask(_dc);
 #endif
   }
 
@@ -372,7 +383,7 @@ inline void Adafruit_PCD8544::spiWrite(uint8_t d) {
     SPI.transfer(d);
   }
   else {
-#ifdef ESP8266
+#ifndef USE_FAST_PINIO
     // Software SPI write with bit banging.
     for(uint8_t bit = 0x80; bit; bit >>= 1) {
       digitalWrite(_sclk, LOW);
@@ -397,21 +408,35 @@ bool Adafruit_PCD8544::isHardwareSPI() {
 }
 
 void Adafruit_PCD8544::command(uint8_t c) {
+  #ifdef USE_FAST_PINIO
+  *dcport &= ~dcpinmask; //LOW
+  if(_cs) *csport &= ~cspinmask; //LOW
+  spiWrite(c);
+  if(_cs) *csport |= cspinmask; //HIGH
+  #else
   digitalWrite(_dc, LOW);
   if (_cs > 0)
     digitalWrite(_cs, LOW);
   spiWrite(c);
   if (_cs > 0)
     digitalWrite(_cs, HIGH);
+  #endif
 }
 
 void Adafruit_PCD8544::data(uint8_t c) {
+  #ifdef USE_FAST_PINIO
+  *dcport |= dcpinmask;
+  if(_cs) *csport &= ~cspinmask;
+  spiWrite(c);
+  if(_cs) *csport |= cspinmask;
+  #else
   digitalWrite(_dc, HIGH);
   if (_cs > 0)
     digitalWrite(_cs, LOW);
   spiWrite(c);
   if (_cs > 0)
     digitalWrite(_cs, HIGH);
+  #endif
 }
 
 void Adafruit_PCD8544::setContrast(uint8_t val) {
@@ -423,15 +448,36 @@ void Adafruit_PCD8544::setContrast(uint8_t val) {
   command( PCD8544_SETVOP | val);
   command(PCD8544_FUNCTIONSET);
   if (isHardwareSPI()) spi_end();
-
- }
-
-
+}
 
 void Adafruit_PCD8544::display(void) {
   uint8_t col, maxcol, p;
 
   if (isHardwareSPI()) spi_begin();
+#ifndef enablePartialUpdate && defined(ESP8266)
+  if(isHardwareSPI()){
+    command(PCD8544_SETYADDR);
+    command(PCD8544_SETXADDR);
+    #ifdef USE_FAST_PINIO
+    *dcport |= dcpinmask;
+    if(_cs) *csport &= ~cspinmask;
+    #else
+    digitalWrite(_dc, HIGH);
+    if (_cs > 0)
+      digitalWrite(_cs, LOW);
+    #endif
+    SPI.writeBytes(pcd8544_buffer, 504);
+    #ifdef USE_FAST_PINIO
+    if(_cs) *csport |= cspinmask;
+    #else
+    if (_cs > 0)
+      digitalWrite(_cs, HIGH);
+    #endif
+    command(PCD8544_SETYADDR );  // no idea why this is necessary but it is to finish the last byte?
+    spi_end();
+    return;
+  }
+#endif
   for(p = 0; p < 6; p++) {
 #ifdef enablePartialUpdate
     // check if this page is part of update
@@ -457,14 +503,33 @@ void Adafruit_PCD8544::display(void) {
 
     command(PCD8544_SETXADDR | col);
 
+    #ifdef USE_FAST_PINIO
+    *dcport |= dcpinmask;
+    if(_cs) *csport &= ~cspinmask;
+    #else
     digitalWrite(_dc, HIGH);
     if (_cs > 0)
       digitalWrite(_cs, LOW);
+    #endif
+    #ifdef ESP8266
+    if(isHardwareSPI()){
+      // Align to 32 bits.
+      while ((reinterpret_cast<uintptr_t>(&pcd8544_buffer[(LCDWIDTH*p)+col]) & 0X3) && col <= maxcol) {
+        spiWrite(pcd8544_buffer[(LCDWIDTH*p)+col]);
+        col++;
+      }
+      SPI.writeBytes(&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
+    } else
+    #endif
     for(; col <= maxcol; col++) {
       spiWrite(pcd8544_buffer[(LCDWIDTH*p)+col]);
     }
+    #ifdef USE_FAST_PINIO
+    if(_cs) *csport |= cspinmask;
+    #else
     if (_cs > 0)
       digitalWrite(_cs, HIGH);
+    #endif
 
   }
 
@@ -480,8 +545,9 @@ void Adafruit_PCD8544::display(void) {
 }
 
 // clear everything
-void Adafruit_PCD8544::clearDisplay(void) {
-  memset(pcd8544_buffer, 0, LCDWIDTH*LCDHEIGHT/8);
+void Adafruit_PCD8544::clearDisplay(uint8_t color) {
+  if(color) color=255;
+  memset(pcd8544_buffer, color, LCDWIDTH*LCDHEIGHT/8);
   updateBoundingBox(0, 0, LCDWIDTH-1, LCDHEIGHT-1);
   cursor_y = cursor_x = 0;
 }
@@ -493,25 +559,29 @@ void Adafruit_PCD8544::invertDisplay(boolean i) {
   if (isHardwareSPI()) spi_end();
 }
 
-void Adafruit_PCD8544::clearDisplayRAM(void) {
-  uint8_t col, maxcol, p;
-
+void Adafruit_PCD8544::clearDisplayRAM(uint8_t color) {
+  uint16_t counter=504;
+  
   if (isHardwareSPI()) spi_begin();
-  for(p = 0; p < 6; p++) {
-    command(PCD8544_SETYADDR | p);
-    col = 0;
-    maxcol = LCDWIDTH-1;
-    command(PCD8544_SETXADDR | col);
-
-    digitalWrite(_dc, HIGH);
-    if (_cs > 0)
-      digitalWrite(_cs, LOW);
-    for(; col <= maxcol; col++) {
-      spiWrite(0);
-    }
-    if (_cs > 0)
-      digitalWrite(_cs, HIGH);
-  }
+  command(PCD8544_SETYADDR);
+  command(PCD8544_SETXADDR);
+  #ifdef USE_FAST_PINIO
+  *dcport |= dcpinmask;
+  if(_cs) *csport &= ~cspinmask;
+  #else
+  digitalWrite(_dc, HIGH);
+  if (_cs > 0) digitalWrite(_cs, LOW);
+  #endif
+  #ifdef ESP8266
+  if(isHardwareSPI()) SPI.writePattern(&color, 1, counter);
+  else
+  #endif
+  while(counter--) spiWrite(color);
+  #ifdef USE_FAST_PINIO
+  if(_cs) *csport |= cspinmask;
+  #else
+  if (_cs > 0) digitalWrite(_cs, HIGH);
+  #endif
   command(PCD8544_SETYADDR );  // no idea why this is necessary but it is to finish the last byte?
   if (isHardwareSPI()) spi_end();
 }
