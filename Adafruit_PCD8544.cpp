@@ -45,23 +45,36 @@ All text above, and the splash screen below must be included in any redistributi
 // establish settings and protect from interference from other
 // libraries.  Otherwise, they simply do nothing.
 #ifdef SPI_HAS_TRANSACTION
-#if defined (ESP8266) || defined (__STM32F1__)
+#if defined (ESP8266)
 SPISettings spiSettings = SPISettings(4000000, MSBFIRST, SPI_MODE0);
+#elif defined (__STM32F1__)
+SPISettings spiSettings = SPISettings(4500000, MSBFIRST, SPI_MODE0);
 #else
 SPISettings spiSettings = SPISettings(PCD8544_SPI_CLOCK_DIV, MSBFIRST, SPI_MODE0);
 #endif
-static inline void spi_begin(void) __attribute__((always_inline));
+/*static inline void spi_begin(void) __attribute__((always_inline));
 static inline void spi_begin(void) {
-  SPI.beginTransaction(spiSettings);
+  _SPI->beginTransaction(spiSettings);
 }
 static inline void spi_end(void) __attribute__((always_inline));
 static inline void spi_end(void) {
-  SPI.endTransaction();
-}
-#else
+  _SPI->endTransaction();
+}*/
+/*#else
 #define spi_begin()
-#define spi_end()
+#define spi_end()*/
 #endif
+
+inline void Adafruit_PCD8544::spi_begin(void) {
+#ifdef SPI_HAS_TRANSACTION
+  _SPI->beginTransaction(spiSettings);
+#endif
+}
+inline void Adafruit_PCD8544::spi_end(void) {
+#ifdef SPI_HAS_TRANSACTION
+  _SPI->endTransaction();
+#endif
+}
 
 // the memory buffer for the LCD
 uint8_t pcd8544_buffer[LCDWIDTH * LCDHEIGHT / 8] = {
@@ -231,7 +244,8 @@ Adafruit_PCD8544::Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC,
   _cs = -1;
 }
 
-Adafruit_PCD8544::Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST):
+Adafruit_PCD8544::Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST, SPIClass *useSPI):
+//Adafruit_PCD8544::Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST):
   Adafruit_GFX(LCDWIDTH, LCDHEIGHT) {
   // -1 for din and sclk specify using hardware SPI
   _din = -1;
@@ -239,6 +253,7 @@ Adafruit_PCD8544::Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST):
   _dc = DC;
   _rst = RST;
   _cs = CS;
+  _SPI = useSPI;
 }
 
 
@@ -289,18 +304,18 @@ uint8_t Adafruit_PCD8544::getPixel(int8_t x, int8_t y) {
 
 void Adafruit_PCD8544::begin(uint8_t contrast, uint8_t bias) {
   if (isHardwareSPI()) {
-    // Setup hardware SPI.
-    SPI.begin();
+    // Setup hardware _SPI->
+    _SPI->begin();
 #ifdef ESP8266
     // Datasheet says 4 MHz is max SPI clock speed
-    SPI.setFrequency(4000000);
+    _SPI->setFrequency(4000000);
 #elif defined (__STM32F1__)
-    SPI.setClockDivider(SPI_CLOCK_DIV16);
+    _SPI->setClockDivider(SPI_CLOCK_DIV16);
 #else
-    SPI.setClockDivider(PCD8544_SPI_CLOCK_DIV);
+    _SPI->setClockDivider(PCD8544_SPI_CLOCK_DIV);
 #endif
-    SPI.setDataMode(SPI_MODE0);
-    SPI.setBitOrder(MSBFIRST);
+    _SPI->setDataMode(SPI_MODE0);
+    _SPI->setBitOrder(MSBFIRST);
 
 #ifdef USE_FAST_PINIO
     csport    = portOutputRegister(digitalPinToPort(_cs));
@@ -310,7 +325,7 @@ void Adafruit_PCD8544::begin(uint8_t contrast, uint8_t bias) {
 #endif
   }
   else {
-    // Setup software SPI.
+    // Setup software _SPI->
 
     // Set software SPI specific pin outputs.
     pinMode(_din, OUTPUT);
@@ -382,7 +397,7 @@ void Adafruit_PCD8544::begin(uint8_t contrast, uint8_t bias) {
 inline void Adafruit_PCD8544::spiWrite(uint8_t d) {
   if (isHardwareSPI()) {
     // Hardware SPI write.
-    SPI.transfer(d);
+    _SPI->transfer(d);
   }
   else {
 #ifndef USE_FAST_PINIO
@@ -471,12 +486,12 @@ void Adafruit_PCD8544::display(void) {
 //Add hardware-specific optimized methods for pushing those 504 bytes over SPI as needed
 //This one's for ESP8266
 #if defined(ESP8266)
-    SPI.writeBytes(pcd8544_buffer, 504);
+    _SPI->writeBytes(pcd8544_buffer, 504);
 //Resort to the default if no optimized method available
 #elif defined (__STM32F1__)
     {
-      SPI.setDataSize (0);
-      SPI.dmaSend(pcd8544_buffer, 504);
+      _SPI->setDataSize (0);
+      _SPI->dmaSend(pcd8544_buffer, 504);
     }
 #else
     for(int i=0; i<504; i++) spiWrite(pcd8544_buffer[i]);
@@ -525,12 +540,12 @@ void Adafruit_PCD8544::display(void) {
         spiWrite(pcd8544_buffer[(LCDWIDTH*p)+col]);
         col++;
       }
-      SPI.writeBytes(&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
+      _SPI->writeBytes(&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
     } else
     #elif defined(__STM32F1__)
     if(isHardwareSPI()){
-      SPI.setDataSize (0);
-      SPI.dmaSend((uint8_t *)&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
+      _SPI->setDataSize (0);
+      _SPI->dmaSend((uint8_t *)&pcd8544_buffer[(LCDWIDTH*p)+col], maxcol - col + 1);
     } else
     #endif
     for(; col <= maxcol; col++) {
@@ -583,12 +598,12 @@ void Adafruit_PCD8544::clearDisplayRAM(uint8_t color) {
   if (_cs > 0) digitalWrite(_cs, LOW);
   #endif
   #ifdef ESP8266
-  if(isHardwareSPI()) SPI.writePattern(&color, 1, counter);
+  if(isHardwareSPI()) _SPI->writePattern(&color, 1, counter);
   else
   #elif defined (__STM32F1__)
   if(isHardwareSPI()){
-  SPI.setDataSize (0);
-  SPI.dmaSend(&color, 504, 0);
+  _SPI->setDataSize (0);
+  _SPI->dmaSend(&color, 504, 0);
   }
   else
   #endif

@@ -83,8 +83,8 @@ class Adafruit_PCD8544 : public Adafruit_GFX {
   // Software SPI with CS tied to ground.  Saves a pin but other pins can't be shared with other hardware.
   Adafruit_PCD8544(int8_t SCLK, int8_t DIN, int8_t DC, int8_t RST);
   // Hardware SPI based on hardware controlled SCK (SCLK) and MOSI (DIN) pins. CS is still controlled by any IO pin.
-  // NOTE: MISO and SS will be set as an input and output respectively, so be careful sharing those pins!
-  Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST);
+  //Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST);
+  Adafruit_PCD8544(int8_t DC, int8_t CS, int8_t RST, SPIClass *useSPI = &SPI);
 
   void begin(uint8_t contrast = 40, uint8_t bias = 0x04);
 
@@ -109,9 +109,11 @@ class Adafruit_PCD8544 : public Adafruit_GFX {
   int8_t _din, _sclk, _dc, _rst, _cs;
   volatile PortReg *mosiport, *clkport, *dcport, *csport;
   PortMask mosipinmask, clkpinmask, cspinmask, dcpinmask;
-
+  void spi_begin();
+  void spi_end();
   void spiWrite(uint8_t c);
   bool isHardwareSPI();
+  SPIClass *_SPI = &SPI;
 };
 
 #endif
